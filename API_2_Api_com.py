@@ -23,7 +23,11 @@ def chatbot_conversation(initial_prompt, turns=3):
             max_tokens=1024,
             messages=[{"role": "user", "content": current_message}]
         )
-        claude_text = claude_response.content[0].text
+        # Extract text from Claude's response (handle different block types)
+        claude_text = ""
+        for block in claude_response.content:
+            if hasattr(block, 'text'):
+                claude_text += block.text
         conversation_history.append({"speaker": "Claude", "message": claude_text})
         
         # GPT responds to Claude
@@ -31,7 +35,7 @@ def chatbot_conversation(initial_prompt, turns=3):
             model="gpt-4o",
             messages=[{"role": "user", "content": claude_text}]
         )
-        gpt_text = gpt_response.choices[0].message.content
+        gpt_text = gpt_response.choices[0].message.content or ""
         conversation_history.append({"speaker": "GPT", "message": gpt_text})
         
         current_message = gpt_text
