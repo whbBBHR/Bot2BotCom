@@ -1,19 +1,27 @@
 from fastapi import FastAPI, File, UploadFile, HTTPException, Form
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
-from typing import List, Optional
+from typing import List, Optional, Any
 import anthropic
+from anthropic.types import TextBlock, MessageParam
+import openai
 import base64
 from io import BytesIO
 from PIL import Image
 import httpx
 from datetime import datetime
 import asyncio
+import sys
+import os
+from dotenv import load_dotenv
 
-app = FastAPI(title="Claude Vision API", version="1.0.0")
+load_dotenv()
 
-# Initialize Claude client
-claude_client = anthropic.Anthropic(api_key="your-api-key-here")
+app = FastAPI(title="Multi-Provider Vision API", version="2.0.0")
+
+# Initialize API clients
+claude_client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+openai_client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 # Response models
 class ImageAnalysisResponse(BaseModel):
@@ -31,9 +39,22 @@ class MultiImageResponse(BaseModel):
 
 # Configuration
 class ModelConfig:
+    # Claude models
     SONNET = "claude-sonnet-4-5-20250929"  # Best balance
     HAIKU = "claude-haiku-4-5-20251001"     # Fastest
     OPUS = "claude-opus-4-20250514"         # Highest quality
+    
+    # OpenAI models
+    GPT4_VISION = "gpt-4o"  # GPT-4 with vision
+    GPT4_TURBO = "gpt-4-turbo"  # GPT-4 Turbo with vision
+    GPT4O_MINI = "gpt-4o-mini"  # Smaller, faster GPT-4o
+
+def extract_text_from_response(response_content) -> str:
+    """Safely extract text from Claude response content"""
+    for block in response_content:
+        if isinstance(block, TextBlock):
+            return block.text
+    return ""
 
 def encode_image(image_bytes: bytes) -> str:
     """Convert image bytes to base64"""
@@ -48,7 +69,8 @@ def get_image_media_type(image_bytes: bytes) -> str:
         'GIF': 'image/gif',
         'WEBP': 'image/webp'
     }
-    return format_map.get(img.format, 'image/jpeg')
+    img_format = img.format or 'JPEG'
+    return format_map.get(img_format, 'image/jpeg')
 
 async def resize_image_if_needed(image_bytes: bytes, max_size: int = 1568) -> bytes:
     """Resize image if too large (Claude has size limits)"""
@@ -58,7 +80,7 @@ async def resize_image_if_needed(image_bytes: bytes, max_size: int = 1568) -> by
     if max(img.size) > max_size:
         # Calculate new size maintaining aspect ratio
         ratio = max_size / max(img.size)
-        new_size = tuple(int(dim * ratio) for dim in img.size)
+        new_size = (int(img.size[0] * ratio), int(img.size[1] * ratio))
         img = img.resize(new_size, Image.Resampling.LANCZOS)
         
         # Convert back to bytes
@@ -99,32 +121,37 @@ async def analyze_single_image(
         media_type = get_image_media_type(image_bytes)
         
         # Call Claude API
-        response = claude_client.messages.create(
+        response = claude_client.messages.create(  # type: ignore
             model=model,
             max_tokens=max_tokens,
-            messages=[{
-                "role": "user",
-                "content": [
-                    {
-                        "type": "image",
-                        "source": {
-                            "type": "base64",
-                            "media_type": media_type,
-                            "data": base64_image
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "image",
+                            "source": {
+                                "type": "base64",
+                                "media_type": media_type,
+                                "data": base64_image
+                            }
+                        },
+                        {
+                            "type": "text",
+                            "text": prompt
                         }
-                    },
-                    {
-                        "type": "text",
-                        "text": prompt
-                    }
-                ]
-            }]
+                    ]
+                }
+            ]
         )
         
         processing_time = (datetime.now() - start_time).total_seconds()
         
+        # Extract text from response safely
+        analysis_text = extract_text_from_response(response.content)
+        
         return ImageAnalysisResponse(
-            analysis=response.content[0].text,
+            analysis=analysis_text,
             model_used=model,
             processing_time=processing_time,
             image_count=1,
@@ -132,6 +159,9 @@ async def analyze_single_image(
         )
         
     except Exception as e:
+        import traceback
+        error_details = traceback.format_exc()
+        print(f"ERROR: {error_details}", file=sys.stderr)
         raise HTTPException(status_code=500, detail=f"Error processing image: {str(e)}")
 
 @app.post("/analyze/multiple", response_model=MultiImageResponse)
@@ -179,19 +209,24 @@ async def analyze_multiple_images(
         })
         
         # Call Claude
-        response = claude_client.messages.create(
+        response = claude_client.messages.create(  # type: ignore
             model=model,
             max_tokens=max_tokens,
-            messages=[{
-                "role": "user",
-                "content": image_contents
-            }]
+            messages=[
+                {
+                    "role": "user",
+                    "content": image_contents
+                }
+            ]
         )
         
         processing_time = (datetime.now() - start_time).total_seconds()
         
+        # Extract text from response safely
+        comparison_text = extract_text_from_response(response.content)
+        
         return MultiImageResponse(
-            comparison=response.content[0].text,
+            comparison=comparison_text,
             model_used=model,
             processing_time=processing_time,
             images_processed=len(files)
@@ -224,32 +259,37 @@ async def analyze_image_from_url(
         media_type = get_image_media_type(image_bytes)
         
         # Call Claude
-        claude_response = claude_client.messages.create(
+        claude_response = claude_client.messages.create(  # type: ignore
             model=model,
             max_tokens=1024,
-            messages=[{
-                "role": "user",
-                "content": [
-                    {
-                        "type": "image",
-                        "source": {
-                            "type": "base64",
-                            "media_type": media_type,
-                            "data": base64_image
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "image",
+                            "source": {
+                                "type": "base64",
+                                "media_type": media_type,
+                                "data": base64_image
+                            }
+                        },
+                        {
+                            "type": "text",
+                            "text": prompt
                         }
-                    },
-                    {
-                        "type": "text",
-                        "text": prompt
-                    }
-                ]
-            }]
+                    ]
+                }
+            ]
         )
         
         processing_time = (datetime.now() - start_time).total_seconds()
         
+        # Extract text from response safely
+        analysis_text = extract_text_from_response(claude_response.content)
+        
         return {
-            "analysis": claude_response.content[0].text,
+            "analysis": analysis_text,
             "processing_time": processing_time,
             "model_used": model
         }
@@ -273,30 +313,35 @@ async def extract_text_from_image(
         base64_image = encode_image(image_bytes)
         media_type = get_image_media_type(image_bytes)
         
-        response = claude_client.messages.create(
+        response = claude_client.messages.create(  # type: ignore
             model=model,
             max_tokens=2048,
-            messages=[{
-                "role": "user",
-                "content": [
-                    {
-                        "type": "image",
-                        "source": {
-                            "type": "base64",
-                            "media_type": media_type,
-                            "data": base64_image
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "image",
+                            "source": {
+                                "type": "base64",
+                                "media_type": media_type,
+                                "data": base64_image
+                            }
+                        },
+                        {
+                            "type": "text",
+                            "text": "Extract all text from this image. Preserve formatting and structure."
                         }
-                    },
-                    {
-                        "type": "text",
-                        "text": "Extract all text from this image. Preserve formatting and structure."
-                    }
-                ]
-            }]
+                    ]
+                }
+            ]
         )
         
+        # Extract text from response safely
+        extracted_text = extract_text_from_response(response.content)
+        
         return {
-            "extracted_text": response.content[0].text,
+            "extracted_text": extracted_text,
             "model_used": model
         }
         
@@ -324,30 +369,35 @@ async def medical_image_analysis(
         
         prompt += "\n\nIMPORTANT: This is for educational purposes only. Always consult qualified healthcare professionals for medical diagnosis."
         
-        response = claude_client.messages.create(
+        response = claude_client.messages.create(  # type: ignore
             model=ModelConfig.OPUS,  # Force Opus for medical
             max_tokens=2048,
-            messages=[{
-                "role": "user",
-                "content": [
-                    {
-                        "type": "image",
-                        "source": {
-                            "type": "base64",
-                            "media_type": media_type,
-                            "data": base64_image
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "image",
+                            "source": {
+                                "type": "base64",
+                                "media_type": media_type,
+                                "data": base64_image
+                            }
+                        },
+                        {
+                            "type": "text",
+                            "text": prompt
                         }
-                    },
-                    {
-                        "type": "text",
-                        "text": prompt
-                    }
-                ]
-            }]
+                    ]
+                }
+            ]
         )
         
+        # Extract text from response safely
+        analysis_text = extract_text_from_response(response.content)
+        
         return {
-            "analysis": response.content[0].text,
+            "analysis": analysis_text,
             "model_used": ModelConfig.OPUS,
             "disclaimer": "For educational purposes only. Not a substitute for professional medical advice."
         }
@@ -384,31 +434,36 @@ async def batch_process_images(
             base64_image = encode_image(image_bytes)
             media_type = get_image_media_type(image_bytes)
             
-            response = claude_client.messages.create(
+            response = claude_client.messages.create(  # type: ignore
                 model=model,
                 max_tokens=512,
-                messages=[{
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "image",
-                            "source": {
-                                "type": "base64",
-                                "media_type": media_type,
-                                "data": base64_image
+                messages=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "image",
+                                "source": {
+                                    "type": "base64",
+                                    "media_type": media_type,
+                                    "data": base64_image
+                                }
+                            },
+                            {
+                                "type": "text",
+                                "text": prompt
                             }
-                        },
-                        {
-                            "type": "text",
-                            "text": prompt
-                        }
-                    ]
-                }]
+                        ]
+                    }
+                ]
             )
+            
+            # Extract text from response safely
+            result_text = extract_text_from_response(response.content)
             
             return {
                 "filename": file.filename,
-                "result": response.content[0].text,
+                "result": result_text,
                 "status": "success"
             }
         except Exception as e:
@@ -429,29 +484,186 @@ async def batch_process_images(
         "results": results
     }
 
+# ============================================================================
+# OPENAI VISION ENDPOINTS
+# ============================================================================
+
+@app.post("/openai/analyze/single", response_model=ImageAnalysisResponse)
+async def analyze_single_image_openai(
+    file: UploadFile = File(...),
+    prompt: str = Form("Describe this image in detail"),
+    model: str = Form(ModelConfig.GPT4_VISION),
+    max_tokens: int = Form(1024)
+):
+    """
+    Analyze a single image using OpenAI GPT-4 Vision
+    
+    - **file**: Image file (JPEG, PNG, GIF, WEBP)
+    - **prompt**: Analysis instructions
+    - **model**: gpt-4o (default), gpt-4-turbo, or gpt-4o-mini
+    - **max_tokens**: Maximum response length
+    """
+    start_time = datetime.now()
+    
+    try:
+        # Read and process image
+        image_bytes = await file.read()
+        image_bytes = await resize_image_if_needed(image_bytes)
+        
+        # Encode image
+        base64_image = encode_image(image_bytes)
+        
+        # Call OpenAI API
+        response = openai_client.chat.completions.create(
+            model=model,
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:image/jpeg;base64,{base64_image}"
+                            }
+                        },
+                        {
+                            "type": "text",
+                            "text": prompt
+                        }
+                    ]
+                }
+            ],
+            max_tokens=max_tokens
+        )
+        
+        processing_time = (datetime.now() - start_time).total_seconds()
+        
+        return ImageAnalysisResponse(
+            analysis=response.choices[0].message.content or "",
+            model_used=model,
+            processing_time=processing_time,
+            image_count=1,
+            timestamp=datetime.now().isoformat()
+        )
+        
+    except Exception as e:
+        import traceback
+        error_details = traceback.format_exc()
+        print(f"ERROR: {error_details}", file=sys.stderr)
+        raise HTTPException(status_code=500, detail=f"Error processing image: {str(e)}")
+
+@app.post("/openai/analyze/multiple", response_model=MultiImageResponse)
+async def analyze_multiple_images_openai(
+    files: List[UploadFile] = File(...),
+    prompt: str = Form("Compare and analyze these images"),
+    model: str = Form(ModelConfig.GPT4_VISION),
+    max_tokens: int = Form(2048)
+):
+    """
+    Analyze and compare multiple images using OpenAI
+    
+    - **files**: List of image files
+    - **prompt**: Analysis instructions
+    - **model**: OpenAI model to use
+    """
+    start_time = datetime.now()
+    
+    if len(files) > 20:
+        raise HTTPException(status_code=400, detail="Maximum 20 images allowed")
+    
+    try:
+        # Process all images
+        image_contents = []
+        
+        for file in files:
+            image_bytes = await file.read()
+            image_bytes = await resize_image_if_needed(image_bytes)
+            base64_image = encode_image(image_bytes)
+            
+            image_contents.append({
+                "type": "image_url",
+                "image_url": {
+                    "url": f"data:image/jpeg;base64,{base64_image}"
+                }
+            })
+        
+        # Add text prompt
+        image_contents.append({
+            "type": "text",
+            "text": prompt
+        })
+        
+        # Call OpenAI
+        response = openai_client.chat.completions.create(
+            model=model,
+            messages=[
+                {
+                    "role": "user",
+                    "content": image_contents
+                }
+            ],
+            max_tokens=max_tokens
+        )
+        
+        processing_time = (datetime.now() - start_time).total_seconds()
+        
+        return MultiImageResponse(
+            comparison=response.choices[0].message.content or "",
+            model_used=model,
+            processing_time=processing_time,
+            images_processed=len(files)
+        )
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
+
 @app.get("/health")
 async def health_check():
     """Health check endpoint"""
     return {
         "status": "healthy",
-        "available_models": {
-            "sonnet": ModelConfig.SONNET,
-            "haiku": ModelConfig.HAIKU,
-            "opus": ModelConfig.OPUS
+        "providers": {
+            "claude": {
+                "available": bool(os.getenv("ANTHROPIC_API_KEY")),
+                "models": {
+                    "sonnet": ModelConfig.SONNET,
+                    "haiku": ModelConfig.HAIKU,
+                    "opus": ModelConfig.OPUS
+                }
+            },
+            "openai": {
+                "available": bool(os.getenv("OPENAI_API_KEY")),
+                "models": {
+                    "gpt4o": ModelConfig.GPT4_VISION,
+                    "gpt4_turbo": ModelConfig.GPT4_TURBO,
+                    "gpt4o_mini": ModelConfig.GPT4O_MINI
+                }
+            }
         }
     }
 
 @app.get("/")
 async def root():
     return {
-        "message": "Claude Vision API",
+        "message": "Multi-Provider Vision API",
+        "version": "2.0.0",
+        "providers": ["claude", "openai"],
         "endpoints": {
-            "single_image": "/analyze/single",
-            "multiple_images": "/analyze/multiple",
-            "image_url": "/analyze/url",
-            "ocr": "/ocr/extract-text",
-            "medical": "/vision/medical-analysis",
-            "batch": "/batch/process-images"
+            "claude": {
+                "single_image": "/analyze/single",
+                "multiple_images": "/analyze/multiple",
+                "image_url": "/analyze/url",
+                "ocr": "/ocr/extract-text",
+                "medical": "/vision/medical-analysis",
+                "batch": "/batch/process-images"
+            },
+            "openai": {
+                "single_image": "/openai/analyze/single",
+                "multiple_images": "/openai/analyze/multiple"
+            },
+            "system": {
+                "health": "/health"
+            }
         }
     }
 
