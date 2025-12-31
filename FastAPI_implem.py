@@ -25,6 +25,8 @@ openai_client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 # Response models
 class ImageAnalysisResponse(BaseModel):
+    model_config = {"protected_namespaces": ()}
+    
     analysis: str
     model_used: str
     processing_time: float
@@ -32,10 +34,25 @@ class ImageAnalysisResponse(BaseModel):
     timestamp: str
 
 class MultiImageResponse(BaseModel):
+    model_config = {"protected_namespaces": ()}
+    
     comparison: str
     model_used: str
     processing_time: float
     images_processed: int
+
+class ComparisonResponse(BaseModel):
+    model_config = {"protected_namespaces": ()}
+    
+    claude_analysis: str
+    claude_model: str
+    claude_time: float
+    openai_analysis: str
+    openai_model: str
+    openai_time: float
+    faster_provider: str
+    time_difference: float
+    timestamp: str
 
 # Configuration
 class ModelConfig:
@@ -299,6 +316,118 @@ async def analyze_image_from_url(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
 
+@app.post("/compare/analyze/single", response_model=ComparisonResponse)
+async def compare_single_image(
+    file: UploadFile = File(...),
+    prompt: str = Form("Describe this image in detail"),
+    claude_model: str = Form(ModelConfig.SONNET),
+    openai_model: str = Form("gpt-4o"),
+    max_tokens: int = Form(1024)
+):
+    """
+    Compare single image analysis between Claude and OpenAI (runs concurrently)
+    
+    - **file**: Image file (JPEG, PNG, GIF, WEBP)
+    - **prompt**: Analysis instructions
+    - **claude_model**: Claude model (sonnet, haiku, opus)
+    - **openai_model**: OpenAI model (gpt-4o, gpt-4-turbo, gpt-4o-mini)
+    - **max_tokens**: Maximum response length
+    """
+    try:
+        # Read and process image once
+        image_bytes = await file.read()
+        image_bytes = await resize_image_if_needed(image_bytes)
+        base64_image = encode_image(image_bytes)
+        
+        # Run both APIs concurrently
+        async def get_claude_analysis():
+            start = datetime.now()
+            response = claude_client.messages.create(
+                model=claude_model,
+                max_tokens=max_tokens,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "image",
+                                "source": {
+                                    "type": "base64",
+                                    "media_type": get_image_media_type(image_bytes),
+                                    "data": base64_image
+                                }
+                            },
+                            {
+                                "type": "text",
+                                "text": prompt
+                            }
+                        ]
+                    }
+                ]
+            )
+            elapsed = (datetime.now() - start).total_seconds()
+            analysis = extract_text_from_response(response.content)
+            return analysis, claude_model, elapsed
+        
+        async def get_openai_analysis():
+            start = datetime.now()
+            response = openai_client.chat.completions.create(
+                model=openai_model,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": f"data:image/jpeg;base64,{base64_image}"
+                                }
+                            },
+                            {
+                                "type": "text",
+                                "text": prompt
+                            }
+                        ]
+                    }
+                ],
+                max_tokens=max_tokens
+            )
+            elapsed = (datetime.now() - start).total_seconds()
+            analysis = response.choices[0].message.content or ""
+            return analysis, openai_model, elapsed
+        
+        # Execute both concurrently
+        claude_result, openai_result = await asyncio.gather(
+            get_claude_analysis(),
+            get_openai_analysis(),
+            return_exceptions=False
+        )
+        
+        claude_analysis, claude_used, claude_time = claude_result
+        openai_analysis, openai_used, openai_time = openai_result
+        
+        # Determine faster provider
+        time_diff = abs(claude_time - openai_time)
+        faster_provider = "OpenAI" if openai_time < claude_time else "Claude"
+        
+        return ComparisonResponse(
+            claude_analysis=claude_analysis,
+            claude_model=claude_used,
+            claude_time=claude_time,
+            openai_analysis=openai_analysis,
+            openai_model=openai_used,
+            openai_time=openai_time,
+            faster_provider=faster_provider,
+            time_difference=time_diff,
+            timestamp=datetime.now().isoformat()
+        )
+        
+    except Exception as e:
+        import traceback
+        error_details = traceback.format_exc()
+        print(f"ERROR: {error_details}", file=sys.stderr)
+        raise HTTPException(status_code=500, detail=f"Error comparing images: {str(e)}")
+
 @app.post("/ocr/extract-text")
 async def extract_text_from_image(
     file: UploadFile = File(...),
@@ -492,7 +621,7 @@ async def batch_process_images(
 async def analyze_single_image_openai(
     file: UploadFile = File(...),
     prompt: str = Form("Describe this image in detail"),
-    model: str = Form(ModelConfig.GPT4_VISION),
+    model: str = Form("gpt-4o"),
     max_tokens: int = Form(1024)
 ):
     """
@@ -556,7 +685,7 @@ async def analyze_single_image_openai(
 async def analyze_multiple_images_openai(
     files: List[UploadFile] = File(...),
     prompt: str = Form("Compare and analyze these images"),
-    model: str = Form(ModelConfig.GPT4_VISION),
+    model: str = Form("gpt-4o"),
     max_tokens: int = Form(2048)
 ):
     """
