@@ -7,3 +7,13 @@ pydantic
 pillow
 httpx
 aiofiles
+prompt_toolkit
+beautifulsoup4
+requests
+shazamio
+sounddevice
+soundfile
+numpy
+pypdf
+python-docx
+markdown
