@@ -1,6 +1,7 @@
 import anthropic
 import openai
 import os
+import re
 from dotenv import load_dotenv
 from datetime import datetime
 import requests
@@ -28,14 +29,50 @@ from document_processor import (
     is_supported_file
 )
 
-# Load environment variables from .env file
-load_dotenv()
+# Load environment variables from .env file (override any existing ones)
+load_dotenv(override=True)
 
 # Bot 1 (Claude) receives a message
 claude_client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
 
 # Bot 2 (OpenAI) responds
 openai_client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+# Centralized model config with environment override and safe defaults
+class ModelConfig:
+    CLAUDE_DEFAULT = os.getenv("CLAUDE_MODEL_DEFAULT", "claude-sonnet-4-5-20250929")
+    CLAUDE_QUICK_CHECK = os.getenv("CLAUDE_MODEL_QUICK_CHECK", "claude-3-5-haiku-20241022")
+
+# Knowledge base for RAG
+KNOWLEDGE_BASE = {
+    "Claude": "Large language model by Anthropic, trained on diverse data up to April 2024",
+    "GPT-4o": "Multimodal AI model by OpenAI with vision and text capabilities",
+    "Bot2Bot": "Dual-agent conversation system combining Claude and GPT-4o for diverse perspectives"
+}
+
+def get_context_prompt():
+    """Add current date context to conversation."""
+    from datetime import datetime
+    today = datetime.now().strftime("%B %d, %Y")
+    return f"[Current Date]\n{today}\n\n"
+
+def anthropic_message(model: str, max_tokens: int, messages: list):
+    """
+    Wrapper to call Anthropic API.
+    """
+    try:
+        return claude_client.messages.create(model=model, max_tokens=max_tokens, messages=messages)
+    except anthropic.NotFoundError as e:
+        print(f"\n❌ Model not found: {model}")
+        print(f"   Error: {e}")
+        print(f"   Please check your API key and available models.")
+        raise
+    except anthropic.AuthenticationError as e:
+        print(f"\n❌ Authentication Error - Invalid API key")
+        print(f"   Model: {model}")
+        print(f"   Error: {e}")
+        print(f"\n   Please check your ANTHROPIC_API_KEY in .env file")
+        raise
 
 def web_search(query, num_results=3):
     """Perform a simple web search and return summarized results."""
@@ -86,14 +123,15 @@ def check_grammar_languagetool(text):
         if result.get('matches'):
             print(f"\n⚠️  Found {len(result['matches'])} potential grammar/clarity issues:\n")
             issues = []
-            for i, match in enumerate(result['matches'][:5], 1):
+            for i, match in enumerate(result['matches']):
+
                 context = match.get('context', {})
                 offset = context.get('offset', 0)
                 length = context.get('length', 0)
                 text_excerpt = context.get('text', '')
 
                 issue_text = text_excerpt[offset:offset+length] if text_excerpt else ''
-                print(f"{i}. {match['message']}")
+                print(f"{i+1}. {match['message']}")
                 if issue_text:
                     print(f"   Issue: '{issue_text}'")
 
@@ -248,144 +286,140 @@ def extract_suggested_question(ai_feedback):
     return None
 
 def review_and_improve_question(question, enable_grammar_check=False):
-    """Review question and offer improvements using Claude."""
+    """Automatically review and improve a question (no prompts)."""
     print("\n" + "="*80)
-    print("🔍 QUESTION REVIEW")
+    print("🔍 QUESTION REVIEW (automatic)")
     print("="*80)
 
-    # First check with LanguageTool for grammar (if enabled)
+    # Optional external grammar check (silent)
     if enable_grammar_check:
-        check_grammar_languagetool(question)
+        _ = check_grammar_languagetool(question)
     else:
-        print("\n⚠️  Grammar check disabled for privacy (using local validation only)")
+        print("Grammar check disabled (privacy).")
 
-    # Then get AI review from Claude for clarity and improvement
-    print("\n🤖 Getting AI clarity review...")
+    # Use the non-interactive refinement
+    result = auto_refine_question(question, enable_grammar_check=enable_grammar_check)
 
-    ai_feedback = None
-    suggested_question = None
+    if result["suggestion"]:
+        print(f'✓ Applied AI improvement: "{result["final"]}"')
+    else:
+        print("✓ No improvement needed. Using original.")
+
+    return result["final"]
+
+def chatbot_conversation(initial_prompt, turns=3, enable_web_search=False, audio_file=None, document_context=None):
+    conversation_history = []
+    
+    # Add context with current date
+    context = get_context_prompt()
+
+    # Add knowledge base info
+    kb_context = f"\n[Knowledge Base]\n"
+    for key, value in KNOWLEDGE_BASE.items():
+        kb_context += f"- {key}: {value}\n"
+
+    # Identify music if audio file is provided
+    music_info = ""
+    if audio_file and Path(audio_file).exists():
+        print("Identifying music...", end=" ", flush=True)
+        music_result = identify_music(audio_file)
+        if music_result.get('found'):
+            music_info = f"\n[Music Identified]\n"
+            music_info += f"Title: {music_result['title']}\n"
+            music_info += f"Artist: {music_result['artist']}\n"
+            music_info += f"Album: {music_result['album']}\n"
+            music_info += f"Genre: {music_result['genres']}\n"
+            if music_result.get('shazam_url'):
+                music_info += f"More info: {music_result['shazam_url']}\n"
+            print("✓", end=" ")
+        else:
+            print(f"✗ ({music_result.get('error', 'Unknown error')})", end=" ")
+
+    # Perform web search if enabled
+    search_results = ""
+    if enable_web_search:
+        print("Searching web...", end=" ", flush=True)
+        search_results = web_search(initial_prompt)
+        print("✓", end=" ")
+
+    # Add document context if provided
+    doc_context = ""
+    if document_context:
+        print("Adding document context...", end=" ", flush=True)
+        doc_context = format_document_context(document_context)
+        print("✓", end=" ")
+
+    # Combine all context with the initial prompt
+    enhanced_prompt = context + kb_context
+    if music_info:
+        enhanced_prompt += music_info
+    if search_results:
+        enhanced_prompt += search_results
+    if doc_context:
+        enhanced_prompt += doc_context
+    enhanced_prompt += f"\n[User Question]\n{initial_prompt}"
+
+    current_message = enhanced_prompt
 
     try:
-        response = claude_client.messages.create(
-            model="claude-sonnet-4-5-20250929",
-            max_tokens=500,
-            messages=[{
-                "role": "user",
-                "content": f"""Review this question for clarity and effectiveness:
+        for i in range(turns):
+            print(f"Turn {i+1}/{turns}...", end=" ", flush=True)
 
-"{question}"
+            # Claude responds
+            claude_response = anthropic_message(
+                ModelConfig.CLAUDE_DEFAULT,
+                1024,
+                [{"role": "user", "content": current_message}]
+            )
 
-Provide:
-1. Clarity score (1-10) with brief explanation
-2. Is it specific enough? (yes/no with explanation)
-3. Suggested improved version
+            # Extract text and images from Claude's response
+            claude_text = ""
+            claude_images = []
 
-IMPORTANT for #3:
-- If the question is already good (score 8+), write: "No improvement needed"
-- If improvement is needed, provide exactly ONE improved version in this format:
-  Suggested improved version: "Your single best improved question here"
-- Do NOT give multiple options
-- Do NOT say "For basic..." or "For technical..."
-- Just give ONE clear improved question in quotes
+            for block in claude_response.content:
+                if block.type == 'text':
+                    claude_text += block.text
 
-Keep your response concise and actionable."""
-            }]
-        )
+            # Extract any images from Claude's response
+            claude_images = extract_images_from_response(claude_response.content, i+1, "Claude")
 
-        # Extract text from response
-        ai_feedback = ""
-        for block in response.content:
-            if block.type == 'text':
-                ai_feedback += block.text
+            # Store Claude's response
+            conversation_history.append({
+                "speaker": "Claude",
+                "message": claude_text,
+                "images": claude_images
+            })
+            print("Claude ✓", end=" ", flush=True)
 
-        print("\n📊 AI Clarity Review:")
-        print("-"*80)
-        print(ai_feedback)
-        print("-"*80)
+            # GPT responds to Claude (with vision support)
+            # Build GPT message content with text
+            message_content = [{"type": "text", "text": claude_text}]
 
-        # Try to extract suggested improvement
-        suggested_question = extract_suggested_question(ai_feedback)
+            # Add images if Claude provided any
+            if claude_images:
+                for img in claude_images:
+                    image_data = prepare_image_for_gpt(img['path'])
+                    if image_data:
+                        message_content.append(image_data)
 
-    except Exception as e:
-        print(f"⚠️  AI review unavailable: {e}")
-        ai_feedback = None
+            gpt_response = openai_client.chat.completions.create(
+                model="gpt-4o",
+                messages=[{"role": "user", "content": message_content}]
+            )
 
-    # Offer options to user
-    print("\n" + "="*80)
-    print("OPTIONS:")
-    print("  [1] Use original question")
+            gpt_text = gpt_response.choices[0].message.content or ""
+            conversation_history.append({
+                "speaker": "GPT",
+                "message": gpt_text,
+                "images": []
+            })
+            print("GPT ✓")
 
-    if suggested_question:
-        print("  [2] Use AI's suggested improvement (auto-rewrite)")
-        print("  [3] Edit manually and recheck")
-        print("  [4] Cancel (return to main menu)")
-    else:
-        print("  [2] Edit manually and recheck")
-        print("  [3] Cancel (return to main menu)")
+            current_message = gpt_text
+    except KeyboardInterrupt:
+        print("\n\nConversation interrupted! Returning partial results...\n")
 
-    print("="*80)
-
-    if suggested_question:
-        print(f"\n💡 AI Suggestion: \"{suggested_question}\"")
-
-    while True:
-        if suggested_question:
-            choice = input("\nYour choice (1/2/3/4): ").strip()
-        else:
-            choice = input("\nYour choice (1/2/3): ").strip()
-
-        if choice == '1':
-            print("✓ Using original question")
-            return question
-        elif choice == '2':
-            if suggested_question:
-                print(f"✓ Using AI's suggestion: \"{suggested_question}\"")
-                return suggested_question
-            else:
-                # No suggestion available, treat as manual edit
-                print("\n")
-                new_question = get_question_with_live_feedback()
-                if new_question:
-                    return review_and_improve_question(new_question, enable_grammar_check)
-                else:
-                    return None
-        elif choice == '3':
-            if suggested_question:
-                # Manual edit
-                print("\n")
-                new_question = get_question_with_live_feedback()
-                if new_question:
-                    return review_and_improve_question(new_question, enable_grammar_check)
-                else:
-                    return None
-            else:
-                # Cancel
-                return None
-        elif choice == '4' and suggested_question:
-            return None
-        else:
-            if suggested_question:
-                print("❌ Invalid choice. Please enter 1, 2, 3, or 4.")
-            else:
-                print("❌ Invalid choice. Please enter 1, 2, or 3.")
-
-def get_context_prompt():
-    """Generate a context prompt with current date and real-time information."""
-    current_date = datetime.now()
-    context = f"""
-[SYSTEM CONTEXT - Current Information]
-Date: {current_date.strftime('%B %d, %Y')}
-Year: {current_date.year}
-Note: You are having this conversation in {current_date.year}. Use this current date for any time-sensitive discussions.
-"""
-    return context
-
-# Simple knowledge base (can be expanded)
-KNOWLEDGE_BASE = {
-    "2026": "We are currently in the year 2026. Major events and developments from 2025 are now historical.",
-    "current_year": "2026",
-    "ai_models": "As of 2026, Claude Sonnet 4.5 and GPT-4o are among the leading AI models available."
-}
+    return conversation_history
 
 # Create images directory if it doesn't exist
 IMAGES_DIR = Path("conversation_images")
@@ -1025,119 +1059,52 @@ def get_document_qa_question():
 
     return question
 
-def chatbot_conversation(initial_prompt, turns=3, enable_web_search=False, audio_file=None, document_context=None):
-    conversation_history = []
+def auto_refine_question(question: str, enable_grammar_check: bool = False) -> dict:
+    """
+    Non-interactive refinement:
+    - Optionally runs grammar check (no prompts)
+    - Gets AI clarity feedback and a single suggested improved question
+    Returns dict: {'final': str, 'suggestion': str|None, 'clarity_feedback': str|None}
+    """
+    if enable_grammar_check:
+        # Silent grammar check (prints minimal info if issues)
+        _ = check_grammar_languagetool(question)
 
-    # Add context with current date (Feature 2: Current date context)
-    context = get_context_prompt()
-
-    # Add knowledge base info (Feature 3: RAG)
-    kb_context = f"\n[Knowledge Base]\n"
-    for key, value in KNOWLEDGE_BASE.items():
-        kb_context += f"- {key}: {value}\n"
-
-    # Identify music if audio file is provided
-    music_info = ""
-    if audio_file and Path(audio_file).exists():
-        print("Identifying music...", end=" ", flush=True)
-        music_result = identify_music(audio_file)
-        if music_result.get('found'):
-            music_info = f"\n[Music Identified]\n"
-            music_info += f"Title: {music_result['title']}\n"
-            music_info += f"Artist: {music_result['artist']}\n"
-            music_info += f"Album: {music_result['album']}\n"
-            music_info += f"Genre: {music_result['genres']}\n"
-            if music_result.get('shazam_url'):
-                music_info += f"More info: {music_result['shazam_url']}\n"
-            print("✓", end=" ")
-        else:
-            print(f"✗ ({music_result.get('error', 'Unknown error')})", end=" ")
-
-    # Perform web search if enabled (Feature 1: Web search)
-    search_results = ""
-    if enable_web_search:
-        print("Searching web...", end=" ", flush=True)
-        search_results = web_search(initial_prompt)
-        print("✓", end=" ")
-
-    # Add document context if provided
-    doc_context = ""
-    if document_context:
-        print("Adding document context...", end=" ", flush=True)
-        doc_context = format_document_context(document_context)
-        print("✓", end=" ")
-
-    # Combine context, knowledge base, music info, search results, documents with the initial prompt
-    enhanced_prompt = context + kb_context
-    if music_info:
-        enhanced_prompt += music_info
-    if search_results:
-        enhanced_prompt += search_results
-    if doc_context:
-        enhanced_prompt += doc_context
-    enhanced_prompt += f"\n[User Question]\n{initial_prompt}"
-
-    current_message = enhanced_prompt
-
+    ai_feedback = None
+    suggestion = None
     try:
-        for i in range(turns):
-            print(f"Turn {i+1}/{turns}...", end=" ", flush=True)
+        response = anthropic_message(
+            ModelConfig.CLAUDE_DEFAULT,
+            500,
+            [{
+                "role": "user",
+                "content": f"""Review this question for clarity and effectiveness and provide ONE improved version if needed:
 
-            # Claude responds
-            claude_response = claude_client.messages.create(
-                model="claude-sonnet-4-5-20250929",
-                max_tokens=1024,
-                messages=[{"role": "user", "content": current_message}]
-            )
+"{question}"
 
-            # Extract text and images from Claude's response
-            claude_text = ""
-            claude_images = []
+Provide:
+1. Clarity score (1-10) with brief explanation
+2. Is it specific enough? (yes/no with explanation)
+3. Suggested improved version (exactly ONE), or "No improvement needed"
 
-            for block in claude_response.content:
-                if block.type == 'text':
-                    claude_text += block.text
+Format:
+Clarity: X/10 - ...
+Specific: yes/no - ...
+Suggested improved version: "Your single best improved question"
+"""
+            }]
+        )
+        ai_feedback = ""
+        for block in response.content:
+            if getattr(block, "type", "") == "text":
+                ai_feedback += block.text
+        suggestion = extract_suggested_question(ai_feedback)
+    except Exception as e:
+        ai_feedback = f"AI review unavailable: {e}"
+        suggestion = None
 
-            # Extract any images from Claude's response
-            claude_images = extract_images_from_response(claude_response.content, i+1, "Claude")
-
-            # Store Claude's response
-            conversation_history.append({
-                "speaker": "Claude",
-                "message": claude_text,
-                "images": claude_images
-            })
-            print("Claude ✓", end=" ", flush=True)
-
-            # GPT responds to Claude (with vision support)
-            # Build GPT message content with text
-            message_content = [{"type": "text", "text": claude_text}]
-
-            # Add images if Claude provided any
-            if claude_images:
-                for img in claude_images:
-                    image_data = prepare_image_for_gpt(img['path'])
-                    if image_data:
-                        message_content.append(image_data)
-
-            gpt_response = openai_client.chat.completions.create(
-                model="gpt-4o",
-                messages=[{"role": "user", "content": message_content}]
-            )
-
-            gpt_text = gpt_response.choices[0].message.content or ""
-            conversation_history.append({
-                "speaker": "GPT",
-                "message": gpt_text,
-                "images": []
-            })
-            print("GPT ✓")
-
-            current_message = gpt_text
-    except KeyboardInterrupt:
-        print("\n\nConversation interrupted! Returning partial results...\n")
-
-    return conversation_history
+    final = suggestion or question
+    return {"final": final, "suggestion": suggestion, "clarity_feedback": ai_feedback}
 
 if __name__ == "__main__":
     try:
@@ -1146,100 +1113,40 @@ if __name__ == "__main__":
         print("=" * 80)
         print("Press Ctrl+C at any time to quit\n")
 
-        # Store document context across sessions
         document_context = None
 
         while True:
-            # Get user input with live feedback
             print("\n" + "="*80)
-            print("STEP 1: Enter Your Question")
+            print("STEP 1: Ask Your Question")
             print("="*80)
             print("Choose input method:")
-            print("  [1] Advanced input with live feedback (recommended)")
-            print("  [2] Simple text input")
-            print("  [3] Show all script features & options")
-            print("  [4] Import documents (PDF, DOCX, TXT, MD) 📄")
-            print("  [0] Exit script")
-
-            if document_context:
-                doc_summary = document_context['summary']
-                print(f"\n  📚 Documents loaded: {doc_summary['successful']} files, {doc_summary['total_words']:,} words")
-
+            print("  [1] Quick Ask (automatic quality and refinement)")
+            print("  [2] Advanced input (live editor, then auto refine)")
+            print("  [3] Import documents (PDF, DOCX, TXT, MD)")
+            print("  [0] Exit")
             print("="*80)
 
-            input_method = input("\nChoice (0/1/2/3/4, default: 1): ").strip()
+            input_method = input("Choice (0/1/2/3, default: 1): ").strip() or "1"
 
-            # Handle exit
-            if input_method == '0':
-                print("\n👋 Exiting Bot2Bot script. Goodbye!")
-                exit(0)
+            if input_method == "0":
+                print("\n👋 Goodbye!")
+                break
 
-            # Show features menu
-            if input_method == '3':
-                print("\n" + "="*80)
-                print("BOT2BOT SCRIPT FEATURES")
-                print("="*80)
-                print("\n📝 Question Input Features:")
-                print("  • Live feedback (real-time character/word count)")
-                print("  • Grammar checking (optional, LanguageTool API)")
-                print("  • AI clarity review (Claude Sonnet 4.5)")
-                print("  • Auto-rewrite suggestions")
-                print("\n📄 Document Import Features:")
-                print("  • PDF text extraction")
-                print("  • Word document support (DOCX, DOC)")
-                print("  • Plain text and Markdown")
-                print("  • Multi-document context")
-                print("  • Document Q&A mode")
-                print("\n🤖 Bot Conversation Features:")
-                print("  • Claude vs GPT-4o conversation")
-                print("  • Configurable number of turns")
-                print("  • Web search integration (optional)")
-                print("  • Current date context")
-                print("  • Document context integration")
-                print("\n🎵 Music Identification Features:")
-                print("  • Capture system audio (BlackHole required)")
-                print("  • Record from microphone")
-                print("  • Shazam integration")
-                print("  • Audio level monitoring")
-                print("\n🖼️  Image Support:")
-                print("  • Claude can generate images")
-                print("  • GPT-4o Vision support")
-                print("  • Images saved to conversation_images/")
-                print("\n🔒 Privacy Features:")
-                print("  • Grammar check disabled by default")
-                print("  • Web search optional")
-                print("  • Local validation (100% private)")
-                print("  • Control what data goes where")
-                print("\n" + "="*80)
-                input("\nPress Enter to continue...")
-                continue
-
-            # Handle document import
-            if input_method == '4':
+            if input_method == "3":
                 result = import_documents_menu()
                 if result:
                     document_context = result
                     print("\n✓ Documents loaded successfully!")
-                    print("  You can now ask questions about these documents.")
-                    print("  The bots will have access to the document content.")
-
-                    # Ask if user wants Document Q&A mode
-                    print("\n" + "="*80)
                     qa_choice = input("Use Document Q&A mode? (y/n, default: y): ").strip().lower()
-
                     if qa_choice != 'n':
                         qa_question = get_document_qa_question()
                         if qa_question:
-                            # Bypass normal question input and go straight to conversation
                             initial_prompt = qa_question
-                            enable_grammar = False
                             turns = 3
-
-                            # Skip to conversation
-                            print(f"\n🎯 Starting Document Q&A conversation...")
                             enable_web_search = False
                             audio_file = None
 
+                            print(f"\n🎯 Starting Document Q&A conversation...")
                             conversation = chatbot_conversation(
                                 initial_prompt,
                                 turns=turns,
@@ -1254,208 +1161,71 @@ if __name__ == "__main__":
                             for entry in conversation:
                                 print(f"{entry['speaker']}:")
                                 print(f"{entry['message']}\n")
-
                                 if entry.get('images'):
-                                    print(f"  [Images ({len(entry['images'])}):]")
                                     for img in entry['images']:
-                                        print(f"    📷 {img['path']}")
-                                    print()
-
+                                        print(f"  📷 {img['path']}")
                                 print("-" * 80 + "\n")
 
-                            print("\nDocument Q&A completed!")
-
-                            # Ask if user wants another conversation
                             continue_choice = input("\nStart another conversation? (y/n): ").strip().lower()
                             if continue_choice not in ['y', 'yes']:
-                                print("\nThank you for using Bot2Bot! Goodbye!")
                                 break
-
-                            print("\n" + "=" * 80 + "\n")
-                            continue
-
                 continue
 
-            # Ask about grammar checking privacy
-            print("\n" + "="*80)
-            print("PRIVACY NOTICE: Grammar Checking")
-            print("="*80)
-            print("Grammar checking sends your question to LanguageTool's public API.")
-            print("⚠️  Your question text will be transmitted to a third-party service.")
-            print("✓  Alternative: Use only local validation + AI review (more private)")
-            print("="*80)
-            grammar_check_choice = input("\nEnable external grammar check? (y/n/back, default: n): ").strip().lower()
-
-            if grammar_check_choice == 'back':
-                print("↩️  Returning to input method selection...")
-                continue
-
-            enable_grammar = grammar_check_choice in ['y', 'yes']
-
-            if input_method == '2':
-                # Simple input
-                initial_prompt = input("\nEnter your discussion question (or 'back' to return): ").strip()
-
-                if initial_prompt.lower() == 'back':
-                    print("↩️  Returning to input method selection...")
-                    continue
-
-                if not initial_prompt:
-                    print("Error: Please enter a valid question.")
-                    continue
-
-                # Ask if they want to review it
-                review_choice = input("Review and improve question? (y/n/back, default: n): ").strip().lower()
-
-                if review_choice == 'back':
-                    print("↩️  Returning to input method selection...")
-                    continue
-
-                if review_choice in ['y', 'yes']:
-                    reviewed_prompt = review_and_improve_question(initial_prompt, enable_grammar_check=enable_grammar)
-                    if reviewed_prompt:
-                        initial_prompt = reviewed_prompt
-                    else:
-                        print("Question cancelled. Starting over...")
-                        continue
-            else:
+            if input_method == "2":
                 # Advanced input with live feedback
                 initial_prompt = get_question_with_live_feedback()
-
                 if not initial_prompt:
-                    print("Question input cancelled. Starting over...")
+                    print("↩️  Cancelled. Returning to menu.")
                     continue
 
-                # Automatically review the question
-                reviewed_prompt = review_and_improve_question(initial_prompt, enable_grammar_check=enable_grammar)
-                if reviewed_prompt:
-                    initial_prompt = reviewed_prompt
-                else:
-                    print("Question cancelled. Starting over...")
+            else:
+                # Quick Ask: single input
+                initial_prompt = input("\nEnter your question: ").strip()
+                if not initial_prompt:
+                    print("❌ Please enter a valid question.")
                     continue
 
+            # Turns
             try:
-                turns_input = input("How many conversation turns? (default: 3): ").strip()
-                turns = int(turns_input) if turns_input else 3
+                turns = int(input("\nHow many turns? (default: 3): ").strip() or "3")
             except ValueError:
-                print("Invalid input. Using default 3 turns.")
                 turns = 3
 
-            # Ask if user wants to identify music
-            print("\n--- Music Identification Options ---")
-            print("1. Capture system audio (what's playing NOW - no microphone!)")
-            print("2. Test microphone levels")
-            print("3. Record from microphone")
-            print("4. Use existing audio file")
-            print("5. Test audio playback & analysis")
-            print("6. List all audio devices")
-            print("7. Skip music identification")
-            music_choice = input("Choose option (1/2/3/4/5/6/7, default: 7): ").strip()
+            # Optional web search
+            enable_web_search = input("Enable web search? [y/N]: ").strip().lower() in ("y", "yes")
 
             audio_file = None
-            if music_choice == '1':
-                # Capture system audio directly
-                print("\n💡 This captures audio playing through your speakers/headphones")
-                print("   No microphone needed - captures internal system audio!")
-                duration_input = input("\nCapture duration in seconds (default: 10): ").strip()
-                duration = int(duration_input) if duration_input else 10
-                audio_file = capture_system_audio(duration=duration)
 
-                if audio_file is None:
-                    print("\n📌 To enable system audio capture:")
-                    print("   1. Install BlackHole: brew install blackhole-2ch")
-                    print("   2. Set BlackHole as output in Audio MIDI Setup")
-                    print("   3. Create Multi-Output Device (BlackHole + Speakers)")
-                    fallback = input("\nUse microphone instead? (y/n): ").strip().lower()
-                    if fallback == 'y':
-                        duration_input = input("Recording duration in seconds (default: 10): ").strip()
-                        duration = int(duration_input) if duration_input else 10
-                        audio_file = record_audio(duration=duration)
+            print(f"\n🚀 Starting {turns}-turn conversation")
+            conversation = chatbot_conversation(
+                initial_prompt,
+                turns=turns,
+                enable_web_search=enable_web_search,
+                audio_file=audio_file,
+                document_context=document_context
+            )
 
-            elif music_choice == '2':
-                # Test microphone
-                test_duration = input("Test duration in seconds (default: 3): ").strip()
-                test_dur = int(test_duration) if test_duration else 3
-                mic_ok = test_microphone(duration=test_dur)
-
-                if mic_ok:
-                    proceed = input("\nProceed with recording? (y/n, default: y): ").strip().lower()
-                    if proceed != 'n':
-                        duration_input = input("Recording duration in seconds (default: 10): ").strip()
-                        duration = int(duration_input) if duration_input else 10
-                        audio_file = record_audio(duration=duration)
-                else:
-                    print("\n⚠️  Microphone test failed. Fix issues before recording.")
-
-            elif music_choice == '3':
-                # Record from microphone directly
-                duration_input = input("Recording duration in seconds (default: 10): ").strip()
-                duration = int(duration_input) if duration_input else 10
-                audio_file = record_audio(duration=duration)
-
-            elif music_choice == '4':
-                # Use existing file
-                audio_file_input = input("Audio file path: ").strip()
-                audio_file = audio_file_input if audio_file_input else None
-
-            elif music_choice == '5':
-                # Test audio playback and analysis
-                test_file = input("Audio file path to test: ").strip()
-                if test_file:
-                    test_result = test_audio_playback(test_file)
-                    if test_result:
-                        use_for_id = input("\nUse this file for identification? (y/n): ").strip().lower()
-                        if use_for_id in ['y', 'yes']:
-                            audio_file = test_file
-
-            elif music_choice == '6':
-                # List devices and let user choose
-                list_audio_devices()
-                device_input = input("\nEnter device number to use (or press Enter to skip): ").strip()
-                if device_input:
-                    try:
-                        device_idx = int(device_input)
-                        duration_input = input("Capture duration in seconds (default: 10): ").strip()
-                        duration = int(duration_input) if duration_input else 10
-                        audio_file = capture_system_audio(duration=duration, device=device_idx)
-                    except ValueError:
-                        print("Invalid device number.")
-
-            # Ask if user wants web search enabled
-            web_search_input = input("Enable web search for real-time info? (y/n, default: n): ").strip().lower()
-            enable_web_search = web_search_input in ['y', 'yes']
-
-            print(f"\nStarting {turns}-turn conversation...\n")
-
-            conversation = chatbot_conversation(initial_prompt, turns=turns, enable_web_search=enable_web_search, audio_file=audio_file, document_context=document_context)
-
-            print("=== Bot2Bot Conversation ===\n")
+            print("\n" + "="*80)
+            print("=== Bot2Bot Conversation ===")
+            print("="*80 + "\n")
             for entry in conversation:
                 print(f"{entry['speaker']}:")
                 print(f"{entry['message']}\n")
-
-                # Display images if any
                 if entry.get('images'):
-                    print(f"  [Images ({len(entry['images'])}):]")
                     for img in entry['images']:
-                        print(f"    📷 {img['path']}")
-                    print()
-
+                        print(f"  📷 {img['path']}")
                 print("-" * 80 + "\n")
 
-            print("\nConversation completed successfully!")
-
-            # Ask if user wants to continue
-            continue_choice = input("\nStart another conversation? (y/n): ").strip().lower()
-            if continue_choice not in ['y', 'yes']:
-                print("\nThank you for using Bot2Bot! Goodbye!")
+            # Loop
+            if input("Start another conversation? [y/N]: ").strip().lower() not in ("y", "yes"):
+                print("\n👋 Goodbye!")
                 break
 
-            print("\n" + "=" * 80 + "\n")
-
     except KeyboardInterrupt:
-        print("\n\nConversation interrupted by user. Exiting gracefully...")
+        print("\n\nInterrupted. Exiting...")
         exit(0)
     except Exception as e:
-        print(f"\n\nError occurred: {str(e)}")
+        print(f"\n\nError: {e}")
+        import traceback
+        traceback.print_exc()
         exit(1)
