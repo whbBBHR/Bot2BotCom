@@ -24,3 +24,13 @@ ENV/
 # OS
 .DS_Store
 Thumbs.db
+
+# Logs
+*.log
+
+# Claude local settings
+.claude/
+
+# Personal photos
+IMG_*.jpeg
+IMG_*.jpg

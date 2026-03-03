@@ -1,0 +1,13 @@
+Sample Document for Testing
+
+This is a test document to demonstrate the document import functionality.
+
+The Bot2Bot script can now:
+1. Import PDF files
+2. Import Word documents (DOCX, DOC)
+3. Import plain text files (TXT)
+4. Import Markdown files (MD)
+
+All content is extracted and provided as context to the AI conversation.
+
+This allows users to ask questions about their documents and get intelligent responses from both Claude and GPT-4o based on the document content.

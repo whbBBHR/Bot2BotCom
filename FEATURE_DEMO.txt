@@ -1,0 +1,291 @@
+╔══════════════════════════════════════════════════════════════════════════════╗
+║                  LIVE FEEDBACK QUESTION INPUT - VISUAL DEMO                  ║
+╚══════════════════════════════════════════════════════════════════════════════╝
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ STEP 1: Choose Input Method                                                 │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+  ╔══════════════════════════════════════════════════════════════════╗
+  ║ STEP 1: Enter Your Question                                     ║
+  ╠══════════════════════════════════════════════════════════════════╣
+  ║ Choose input method:                                             ║
+  ║   [1] Advanced input with live feedback (recommended)            ║
+  ║   [2] Simple text input                                          ║
+  ╚══════════════════════════════════════════════════════════════════╝
+
+  Choice (1/2, default: 1): █
+
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ STEP 2: Live Feedback While Typing                                          │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+  ╔══════════════════════════════════════════════════════════════════╗
+  ║ 📝 QUESTION INPUT WITH LIVE FEEDBACK                            ║
+  ╠══════════════════════════════════════════════════════════════════╣
+  ║ Type your question below. Bottom bar shows live stats.          ║
+  ║                                                                  ║
+  ║ ❯ █                                                              ║
+  ╟──────────────────────────────────────────────────────────────────╢
+  ║ Characters: 0/1000 | Words: 0 | Press Enter to submit           ║
+  ╚══════════════════════════════════════════════════════════════════╝
+
+  ⬇️ User starts typing...
+
+  ╔══════════════════════════════════════════════════════════════════╗
+  ║ 📝 QUESTION INPUT WITH LIVE FEEDBACK                            ║
+  ╠══════════════════════════════════════════════════════════════════╣
+  ║ Type your question below. Bottom bar shows live stats.          ║
+  ║                                                                  ║
+  ║ ❯ AI█                                                            ║
+  ╟──────────────────────────────────────────────────────────────────╢
+  ║ Characters: 2/1000 | Words: 1 | 🔴 Too short | ⚠️  Detail needed ║
+  ╚══════════════════════════════════════════════════════════════════╝
+
+  ⬇️ User continues typing...
+
+  ╔══════════════════════════════════════════════════════════════════╗
+  ║ 📝 QUESTION INPUT WITH LIVE FEEDBACK                            ║
+  ╠══════════════════════════════════════════════════════════════════╣
+  ║ Type your question below. Bottom bar shows live stats.          ║
+  ║                                                                  ║
+  ║ ❯ What are the key differences between Claude and GPT█          ║
+  ╟──────────────────────────────────────────────────────────────────╢
+  ║ Characters: 49/1000 | Words: 9 | 🟢 ✓ Good | ⚠️  Add ? mark     ║
+  ╚══════════════════════════════════════════════════════════════════╝
+
+  ⬇️ User adds question mark...
+
+  ╔══════════════════════════════════════════════════════════════════╗
+  ║ 📝 QUESTION INPUT WITH LIVE FEEDBACK                            ║
+  ╠══════════════════════════════════════════════════════════════════╣
+  ║ Type your question below. Bottom bar shows live stats.          ║
+  ║                                                                  ║
+  ║ ❯ What are the key differences between Claude and GPT?█         ║
+  ╟──────────────────────────────────────────────────────────────────╢
+  ║ Characters: 50/1000 | Words: 9 | 🟢 ✓ Good length | Press Enter ║
+  ╚══════════════════════════════════════════════════════════════════╝
+
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ STEP 3: Grammar Check (LanguageTool API)                                    │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+  ╔══════════════════════════════════════════════════════════════════╗
+  ║ 🔍 QUESTION REVIEW                                               ║
+  ╠══════════════════════════════════════════════════════════════════╣
+  ║                                                                  ║
+  ║ 🔍 Checking grammar with LanguageTool...                         ║
+  ║                                                                  ║
+  ║ ✓ No grammar issues detected                                    ║
+  ║                                                                  ║
+  ╚══════════════════════════════════════════════════════════════════╝
+
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ STEP 4: AI Clarity Review (Claude Sonnet 4.5)                               │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+  ╔══════════════════════════════════════════════════════════════════╗
+  ║ 🤖 Getting AI clarity review...                                  ║
+  ╠══════════════════════════════════════════════════════════════════╣
+  ║                                                                  ║
+  ║ 📊 AI Clarity Review:                                            ║
+  ║ ────────────────────────────────────────────────────────────     ║
+  ║ Clarity score: 9/10                                              ║
+  ║                                                                  ║
+  ║ This is a well-structured comparison question that clearly       ║
+  ║ specifies the two AI models being compared.                      ║
+  ║                                                                  ║
+  ║ Is it specific enough? Yes                                       ║
+  ║ The question focuses on key differences, which is answerable     ║
+  ║ and specific.                                                    ║
+  ║                                                                  ║
+  ║ Suggested improved version: No improvement needed                ║
+  ║ ────────────────────────────────────────────────────────────     ║
+  ╚══════════════════════════════════════════════════════════════════╝
+
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ STEP 5: User Decision                                                       │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+  ╔══════════════════════════════════════════════════════════════════╗
+  ║ OPTIONS:                                                         ║
+  ║   [1] Use original question                                      ║
+  ║   [2] Edit and recheck                                           ║
+  ║   [3] Cancel (return to main menu)                               ║
+  ╚══════════════════════════════════════════════════════════════════╝
+
+  Your choice (1/2/3): █
+
+
+═══════════════════════════════════════════════════════════════════════════════
+                            EXAMPLE WITH ISSUES
+═══════════════════════════════════════════════════════════════════════════════
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ User types: "What is the differense between AI and machine lerning"         │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+GRAMMAR CHECK RESULTS:
+
+  ╔══════════════════════════════════════════════════════════════════╗
+  ║ ⚠️  Found 2 potential grammar/clarity issues:                    ║
+  ╠══════════════════════════════════════════════════════════════════╣
+  ║                                                                  ║
+  ║ 1. Possible spelling mistake found.                              ║
+  ║    Issue: 'differense'                                           ║
+  ║    Suggestions: difference, different, differing                 ║
+  ║                                                                  ║
+  ║ 2. Possible spelling mistake found.                              ║
+  ║    Issue: 'lerning'                                              ║
+  ║    Suggestions: learning, earning, warning                       ║
+  ║                                                                  ║
+  ╚══════════════════════════════════════════════════════════════════╝
+
+AI CLARITY REVIEW:
+
+  ╔══════════════════════════════════════════════════════════════════╗
+  ║ 📊 AI Clarity Review:                                            ║
+  ╠══════════════════════════════════════════════════════════════════╣
+  ║ Clarity score: 7/10                                              ║
+  ║                                                                  ║
+  ║ The question is understandable but has spelling errors and       ║
+  ║ could be more specific about what type of difference.            ║
+  ║                                                                  ║
+  ║ Is it specific enough? Partially                                 ║
+  ║ Consider specifying whether you want technical, practical,       ║
+  ║ or conceptual differences.                                       ║
+  ║                                                                  ║
+  ║ Suggested improved version:                                      ║
+  ║ "What is the difference between artificial intelligence and      ║
+  ║ machine learning in terms of their scope and applications?"      ║
+  ╚══════════════════════════════════════════════════════════════════╝
+
+USER CAN NOW:
+  → Choose [1] to use original (with errors)
+  → Choose [2] to edit and fix the spelling
+  → Choose [3] to cancel
+
+
+═══════════════════════════════════════════════════════════════════════════════
+                         FEEDBACK COLOR INDICATORS
+═══════════════════════════════════════════════════════════════════════════════
+
+  🔴 RED (Error)     → Question too short (< 5 characters)
+                     → Question too long (> 1000 characters)
+
+  🟡 YELLOW (Warning) → Less than 3 words (too brief)
+                      → More than 100 words (too verbose)
+                      → Missing question mark
+
+  🟢 GREEN (Good)    → Optimal length (5-1000 chars, 3-100 words)
+                     → Well-structured question
+
+
+═══════════════════════════════════════════════════════════════════════════════
+                            WORKFLOW DIAGRAM
+═══════════════════════════════════════════════════════════════════════════════
+
+   ┌─────────────────┐
+   │  Start Script   │
+   └────────┬────────┘
+            │
+            ▼
+   ┌─────────────────────────┐
+   │ Choose Input Method     │
+   │ [1] Live Feedback       │◄─────┐
+   │ [2] Simple Input        │      │
+   └────────┬────────────────┘      │
+            │                       │
+            ▼                       │
+   ┌─────────────────────────┐      │
+   │   Type Question         │      │
+   │   (Live feedback        │      │
+   │    updates in real-time)│      │
+   └────────┬────────────────┘      │
+            │                       │
+            ▼                       │
+   ┌─────────────────────────┐      │
+   │  Grammar Check          │      │
+   │  (LanguageTool API)     │      │
+   └────────┬────────────────┘      │
+            │                       │
+            ▼                       │
+   ┌─────────────────────────┐      │
+   │  AI Clarity Review      │      │
+   │  (Claude Sonnet 4.5)    │      │
+   └────────┬────────────────┘      │
+            │                       │
+            ▼                       │
+   ┌─────────────────────────┐      │
+   │  Choose Action:         │      │
+   │  [1] Use Question   ────┼──────┤
+   │  [2] Edit & Recheck ────┼──────┘
+   │  [3] Cancel             │
+   └────────┬────────────────┘
+            │ [1]
+            ▼
+   ┌─────────────────────────┐
+   │  Continue with          │
+   │  Bot Conversation       │
+   └─────────────────────────┘
+
+
+═══════════════════════════════════════════════════════════════════════════════
+                          TECHNICAL ARCHITECTURE
+═══════════════════════════════════════════════════════════════════════════════
+
+  ┌───────────────────────────────────────────────────────────────┐
+  │                     USER INTERFACE LAYER                      │
+  │                                                               │
+  │  ┌─────────────────────────────────────────────────────┐     │
+  │  │           prompt_toolkit Framework                  │     │
+  │  │  • QuestionValidator (real-time validation)         │     │
+  │  │  • get_bottom_toolbar() (live stats display)        │     │
+  │  │  • Custom styling (color-coded feedback)            │     │
+  │  └─────────────────────────────────────────────────────┘     │
+  └───────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+  ┌───────────────────────────────────────────────────────────────┐
+  │                  PROCESSING LAYER                             │
+  │                                                               │
+  │  ┌──────────────────────┐    ┌─────────────────────┐         │
+  │  │  Grammar Check       │    │  AI Clarity Review  │         │
+  │  │                      │    │                     │         │
+  │  │  LanguageTool API    │    │  Claude Sonnet 4.5  │         │
+  │  │  • Spelling errors   │    │  • Clarity score    │         │
+  │  │  • Grammar issues    │    │  • Specificity      │         │
+  │  │  • Suggestions       │    │  • Improvements     │         │
+  │  └──────────────────────┘    └─────────────────────┘         │
+  └───────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+  ┌───────────────────────────────────────────────────────────────┐
+  │                   APPLICATION LAYER                           │
+  │                                                               │
+  │  ┌─────────────────────────────────────────────────────┐     │
+  │  │         Main Bot2Bot Conversation                   │     │
+  │  │  • Claude ↔ GPT-4o exchange                         │     │
+  │  │  • Context management                                │     │
+  │  │  • Result display                                    │     │
+  │  └─────────────────────────────────────────────────────┘     │
+  └───────────────────────────────────────────────────────────────┘
+
+
+═══════════════════════════════════════════════════════════════════════════════
+                               KEY BENEFITS
+═══════════════════════════════════════════════════════════════════════════════
+
+  ✓ REAL-TIME FEEDBACK    → See issues as you type, not after
+  ✓ GRAMMAR CHECKING      → Catch spelling and grammar mistakes
+  ✓ CLARITY ANALYSIS      → AI-powered question improvement
+  ✓ ITERATIVE REFINEMENT  → Edit and recheck until perfect
+  ✓ USER FRIENDLY         → Visual feedback with color coding
+  ✓ FLEXIBLE              → Optional - can use simple input instead
+  ✓ EDUCATIONAL           → Learn to write better questions
+
+═══════════════════════════════════════════════════════════════════════════════
